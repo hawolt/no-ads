@@ -30,7 +30,7 @@ public class Tray {
 
         try {
             Image image = ImageIO.read(iconStream);
-            TrayIcon trayIcon = new TrayIcon(image, "My App", popup);
+            TrayIcon trayIcon = new TrayIcon(image, "no-ads", popup);
 
             trayIcon.setImageAutoSize(true);
 

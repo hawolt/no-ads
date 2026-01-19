@@ -183,4 +183,4 @@ function insertReplacementButton(){
     }, 300);
 })();
 
-console.log('Video DOM Editor extension loaded for:', window.location.href);
+console.log('no-ads extension loaded for:', window.location.href);
