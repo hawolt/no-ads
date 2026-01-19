@@ -85,7 +85,6 @@ jobs:
           if (-not $exe) { Write-Error "No Rust executable found"; exit 1 }
           Copy-Item $exe.FullName "rust-wrapper/target/release/local-server.exe"
           Write-Host "Rust executable renamed to local-server.exe"
-
       - name: Create GitHub Release
         id: create_release
         uses: actions/create-release@v1
@@ -104,6 +103,8 @@ jobs:
           asset_path: local-server/target/local-server.jar
           asset_name: local-server.jar
           asset_content_type: application/java-archive
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Upload local-server.exe
         uses: actions/upload-release-asset@v1
         with:
@@ -111,3 +112,7 @@ jobs:
           asset_path: rust-wrapper/target/release/local-server.exe
           asset_name: local-server.exe
           asset_content_type: application/octet-stream
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+
