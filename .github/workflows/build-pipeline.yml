@@ -104,13 +104,6 @@ jobs:
           asset_path: local-server/target/local-server.jar
           asset_name: local-server.jar
           asset_content_type: application/java-archive
-<<<<<<< HEAD
-<<<<<<< HEAD
-      
-=======
->>>>>>> main
-=======
->>>>>>> main
       - name: Upload local-server.exe
         uses: actions/upload-release-asset@v1
         with:
@@ -118,20 +111,3 @@ jobs:
           asset_path: rust-wrapper/target/release/local-server.exe
           asset_name: local-server.exe
           asset_content_type: application/octet-stream
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-=======
->>>>>>> main
-
-      - name: Upload JRE zip
-        uses: actions/upload-release-asset@v1
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: jre-17.0.17-x64.zip
-          asset_name: jre.zip
-          asset_content_type: application/zip
-<<<<<<< HEAD
->>>>>>> main
-=======
->>>>>>> main
