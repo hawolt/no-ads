@@ -115,4 +115,18 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Zip Chromium extension
+        shell: powershell
+        run: |
+          Compress-Archive -Path "extension-chromium/*" -DestinationPath "extension-chromium.zip"
+          Write-Host "Chromium extension zipped to extension-chromium.zip"
 
+      - name: Upload extension-chromium.zip
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: extension-chromium.zip
+          asset_name: extension-chromium.zip
+          asset_content_type: application/zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
