@@ -128,7 +128,7 @@ jobs:
 
       - name: Upload release assets
         if: github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: release-assets
           path: release-assets/
