@@ -34,6 +34,7 @@ public class Main {
     private static final Map<String, String> tracker = new HashMap<>();
 
     public static void main(String[] args) {
+        Tray.create();
         Javalin app = Javalin.create().before("*", ctx -> {
             ctx.header("Access-Control-Allow-Origin", "*");
             ctx.header("Access-Control-Allow-Methods", "*");
