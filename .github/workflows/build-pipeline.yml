@@ -41,6 +41,7 @@ jobs:
           Write-Host "Maven build completed"
           Get-ChildItem -Path target -Force
 
+      - name: Verify and rename application.jar
         shell: powershell
         run: |
           $jar = Get-ChildItem -Path "local-server/target" -Filter "*.jar" |
