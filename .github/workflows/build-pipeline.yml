@@ -59,7 +59,7 @@ jobs:
         shell: powershell
         run: |
           Write-Host "Downloading JRE 17.0.17 from Red Hat..."
-          Invoke-WebRequest -Uri "https://download.developers.redhat.com/openjdk/releases/jre-17.0.17-x64.zip" -OutFile "jre-17.0.17-x64.zip"
+          Invoke-WebRequest -Uri "https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.17+10/OpenJDK17U-jdk_x64_windows_hotspot_17.0.17_10.zip" -OutFile "jre-17.0.17-x64.zip"
           Write-Host "JRE download completed"
           Get-ChildItem -Path jre-17.0.17-x64.zip -Force
 
