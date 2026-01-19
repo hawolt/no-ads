@@ -28,38 +28,40 @@ jobs:
           restore-keys: ${{ runner.os }}-m2
 
       - name: Build local-server with Maven
+        shell: powershell
         run: |
           cd local-server
           mvn clean package -DskipTests
-          echo "Maven build completed"
-          ls -la target/
+          Write-Host "Maven build completed"
+          Get-ChildItem -Path target -Force
 
       - name: Verify application.jar exists
+        shell: powershell
         run: |
-          if [ -f "local-server/target/application.jar" ]; then
-            echo "application.jar found"
-            ls -la local-server/target/application.jar
-          else
-            echo "Looking for JAR files in target directory:"
-            find local-server/target -name "*.jar" -type f
-            # Try to find the main jar file (usually has the project name)
-            JAR_FILE=$(find local-server/target -name "*.jar" -not -name "*sources*" -not -name "*javadoc*" | head -n 1)
-            if [ -n "$JAR_FILE" ]; then
-              echo "Found JAR file: $JAR_FILE"
-              cp "$JAR_FILE" local-server/target/application.jar
-              echo "Renamed to application.jar"
-            else
-              echo "No suitable JAR file found"
-              exit 1
-            fi
-          fi
+          if (Test-Path "local-server/target/application.jar") {
+              Write-Host "application.jar found"
+              Get-ChildItem -Path local-server/target/application.jar -Force
+          } else {
+              Write-Host "Looking for JAR files in target directory..."
+              $JAR_FILE = Get-ChildItem -Path local-server/target -Filter "*.jar" -Recurse |
+                          Where-Object { $_.Name -notmatch "sources|javadoc" } |
+                          Select-Object -First 1
+              if ($JAR_FILE) {
+                  Copy-Item $JAR_FILE.FullName "local-server/target/application.jar"
+                  Write-Host "Renamed to application.jar"
+              } else {
+                  Write-Error "No suitable JAR file found"
+                  exit 1
+              }
+          }
 
       - name: Download JRE
+        shell: powershell
         run: |
-          echo "Downloading JRE 17.0.17 from Red Hat..."
-          curl -L -o jre-17.0.17-x64.zip "https://download.developers.redhat.com/openjdk/releases/jre-17.0.17-x64.zip"
-          echo "JRE download completed"
-          ls -la jre-17.0.17-x64.zip
+          Write-Host "Downloading JRE 17.0.17 from Red Hat..."
+          Invoke-WebRequest -Uri "https://download.developers.redhat.com/openjdk/releases/jre-17.0.17-x64.zip" -OutFile "jre-17.0.17-x64.zip"
+          Write-Host "JRE download completed"
+          Get-ChildItem -Path jre-17.0.17-x64.zip -Force
 
       - name: Set up Rust
         uses: actions-rs/toolchain@v1
@@ -72,24 +74,20 @@ jobs:
         uses: actions/cache@v3
         with:
           path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            rust-wrapper/target/
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust-wrapper/target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Prepare files for Rust build
+        shell: powershell
         run: |
-          echo "Preparing files for Rust wrapper..."
-          # Copy application.jar to rust-wrapper directory
-          cp local-server/target/application.jar rust-wrapper/
-          # Copy JRE zip to rust-wrapper directory  
-          cp jre-17.0.17-x64.zip rust-wrapper/jre.zip
-          
-          echo "Files prepared for Rust build:"
-          ls -la rust-wrapper/application.jar rust-wrapper/jre.zip
+          Write-Host "Preparing files for Rust wrapper..."
+          Copy-Item "local-server/target/application.jar" "rust-wrapper/application.jar"
+          Copy-Item "jre-17.0.17-x64.zip" "rust-wrapper/jre.zip"
+          Write-Host "Files prepared for Rust build:"
+          Get-ChildItem -Path "rust-wrapper/application.jar", "rust-wrapper/jre.zip" -Force
 
       - name: Build Rust wrapper
         uses: actions-rs/cargo@v1
@@ -98,11 +96,12 @@ jobs:
           args: --release --manifest-path rust-wrapper/Cargo.toml
 
       - name: Verify Rust build output
+        shell: powershell
         run: |
-          echo "Rust build completed. Checking output:"
-          ls -la rust-wrapper/target/release/
-          # Find the executable (usually same name as package in Cargo.toml)
-          find rust-wrapper/target/release -maxdepth 1 -type f -executable
+          Write-Host "Rust build completed. Checking output:"
+          Get-ChildItem -Path "rust-wrapper/target/release" -Force
+          $exe = Get-ChildItem -Path "rust-wrapper/target/release" -Filter "*.exe" | Select-Object -First 1
+          Write-Host "Found executable: $($exe.FullName)"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -111,20 +110,20 @@ jobs:
           path: |
             local-server/target/application.jar
             jre-17.0.17-x64.zip
-            rust-wrapper/target/release/
+            rust-wrapper/target/release/*.exe
           retention-days: 30
 
       - name: Create release assets (on main branch)
         if: github.ref == 'refs/heads/main'
+        shell: powershell
         run: |
-          mkdir -p release-assets
-          cp local-server/target/application.jar release-assets/
-          cp jre-17.0.17-x64.zip release-assets/jre.zip
-          # Copy the Rust executable (adjust name as needed based on your Cargo.toml)
-          find rust-wrapper/target/release -maxdepth 1 -type f -executable -exec cp {} release-assets/ \;
-          
-          echo "Release assets prepared:"
-          ls -la release-assets/
+          New-Item -ItemType Directory -Force -Path release-assets
+          Copy-Item "local-server/target/application.jar" "release-assets/"
+          Copy-Item "jre-17.0.17-x64.zip" "release-assets/jre.zip"
+          $exe = Get-ChildItem -Path "rust-wrapper/target/release" -Filter "*.exe" | Select-Object -First 1
+          Copy-Item $exe.FullName "release-assets/"
+          Write-Host "Release assets prepared:"
+          Get-ChildItem -Path release-assets -Force
 
       - name: Upload release assets
         if: github.ref == 'refs/heads/main'
