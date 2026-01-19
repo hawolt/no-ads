@@ -17,16 +17,6 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - name: Create GitHub Release test
-        id: create_release
-        uses: actions/create-release@v1
-        with:
-          tag_name: "release-${{ github.sha }}"
-          release_name: "Release ${{ github.sha }}"
-          draft: false
-          prerelease: false
-          token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -51,7 +41,6 @@ jobs:
           Write-Host "Maven build completed"
           Get-ChildItem -Path target -Force
 
-      - name: Verify and rename application.jar
         shell: powershell
         run: |
           $jar = Get-ChildItem -Path "local-server/target" -Filter "*.jar" |
@@ -105,7 +94,8 @@ jobs:
           release_name: "Release ${{ github.sha }}"
           draft: false
           prerelease: false
-          token: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload local-server.jar
         uses: actions/upload-release-asset@v1
@@ -125,3 +115,4 @@ jobs:
           asset_content_type: application/octet-stream
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
