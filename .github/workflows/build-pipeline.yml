@@ -1,13 +1,15 @@
-name: Build Pipeline
+name: Build & Release
 
 on:
   push:
-    branches: [ dev ]
+    branches:
+      - main
   pull_request:
-    branches: [ main ]
+    branches:
+      - dev
 
 jobs:
-  build:
+  build-and-release:
     runs-on: windows-latest
 
     steps:
@@ -35,33 +37,22 @@ jobs:
           Write-Host "Maven build completed"
           Get-ChildItem -Path target -Force
 
-      - name: Verify application.jar exists
+      - name: Verify and rename application.jar
         shell: powershell
         run: |
-          if (Test-Path "local-server/target/application.jar") {
-              Write-Host "application.jar found"
-              Get-ChildItem -Path local-server/target/application.jar -Force
-          } else {
-              Write-Host "Looking for JAR files in target directory..."
-              $JAR_FILE = Get-ChildItem -Path local-server/target -Filter "*.jar" -Recurse |
-                          Where-Object { $_.Name -notmatch "sources|javadoc" } |
-                          Select-Object -First 1
-              if ($JAR_FILE) {
-                  Copy-Item $JAR_FILE.FullName "local-server/target/application.jar"
-                  Write-Host "Renamed to application.jar"
-              } else {
-                  Write-Error "No suitable JAR file found"
-                  exit 1
-              }
-          }
+          $jar = Get-ChildItem -Path "local-server/target" -Filter "*.jar" |
+                 Where-Object { $_.Name -notmatch "sources|javadoc" } |
+                 Select-Object -First 1
+          if (-not $jar) { Write-Error "No JAR found"; exit 1 }
+          Copy-Item $jar.FullName "local-server/target/local-server.jar"
+          Write-Host "JAR renamed to local-server.jar"
 
       - name: Download JRE
         shell: powershell
         run: |
-          Write-Host "Downloading JRE 17.0.17 from Red Hat..."
+          Write-Host "Downloading JRE 17.0.17..."
           Invoke-WebRequest -Uri "https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.17+10/OpenJDK17U-jdk_x64_windows_hotspot_17.0.17_10.zip" -OutFile "jre-17.0.17-x64.zip"
           Write-Host "JRE download completed"
-          Get-ChildItem -Path jre-17.0.17-x64.zip -Force
 
       - name: Set up Rust
         uses: actions-rs/toolchain@v1
@@ -70,21 +61,10 @@ jobs:
           default: true
           override: true
 
-      - name: Cache Rust dependencies
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            rust-wrapper/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
-
       - name: Prepare files for Rust build
         shell: powershell
         run: |
-          Write-Host "Preparing files for Rust wrapper..."
-          Copy-Item "local-server/target/application.jar" "rust-wrapper/application.jar"
+          Copy-Item "local-server/target/local-server.jar" "rust-wrapper/application.jar"
           Copy-Item "jre-17.0.17-x64.zip" "rust-wrapper/jre.zip"
           Write-Host "Files prepared for Rust build:"
           Get-ChildItem -Path "rust-wrapper/application.jar", "rust-wrapper/jre.zip" -Force
@@ -95,40 +75,44 @@ jobs:
           command: build
           args: --release --manifest-path rust-wrapper/Cargo.toml
 
-      - name: Verify Rust build output
+      - name: Rename Rust executable
         shell: powershell
         run: |
-          Write-Host "Rust build completed. Checking output:"
-          Get-ChildItem -Path "rust-wrapper/target/release" -Force
-          $exe = Get-ChildItem -Path "rust-wrapper/target/release" -Filter "*.exe" | Select-Object -First 1
-          Write-Host "Found executable: $($exe.FullName)"
+          $exe = Get-ChildItem "rust-wrapper/target/release" -Filter "*.exe" | Select-Object -First 1
+          if (-not $exe) { Write-Error "No Rust executable found"; exit 1 }
+          Copy-Item $exe.FullName "rust-wrapper/target/release/local-server.exe"
+          Write-Host "Rust executable renamed to local-server.exe"
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+      - name: Create GitHub Release
+        id: create_release
+        uses: actions/create-release@v1
         with:
-          name: build-artifacts
-          path: |
-            local-server/target/application.jar
-            jre-17.0.17-x64.zip
-            rust-wrapper/target/release/*.exe
-          retention-days: 30
+          tag_name: "release-${{ github.sha }}"
+          release_name: "Release ${{ github.sha }}"
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Create release assets (on main branch)
-        if: github.ref == 'refs/heads/main'
-        shell: powershell
-        run: |
-          New-Item -ItemType Directory -Force -Path release-assets
-          Copy-Item "local-server/target/application.jar" "release-assets/"
-          Copy-Item "jre-17.0.17-x64.zip" "release-assets/jre.zip"
-          $exe = Get-ChildItem -Path "rust-wrapper/target/release" -Filter "*.exe" | Select-Object -First 1
-          Copy-Item $exe.FullName "release-assets/"
-          Write-Host "Release assets prepared:"
-          Get-ChildItem -Path release-assets -Force
-
-      - name: Upload release assets
-        if: github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v4
+      - name: Upload local-server.jar
+        uses: actions/upload-release-asset@v1
         with:
-          name: release-assets
-          path: release-assets/
-          retention-days: 90
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: local-server/target/local-server.jar
+          asset_name: local-server.jar
+          asset_content_type: application/java-archive
+      - name: Upload local-server.exe
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: rust-wrapper/target/release/local-server.exe
+          asset_name: local-server.exe
+          asset_content_type: application/octet-stream
+
+      - name: Upload JRE zip
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: jre-17.0.17-x64.zip
+          asset_name: jre.zip
+          asset_content_type: application/zip
