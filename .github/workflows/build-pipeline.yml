@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - dev
   pull_request:
     branches:
       - dev
@@ -94,8 +95,6 @@ jobs:
           release_name: "Release ${{ github.sha }}"
           draft: false
           prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload local-server.jar
         uses: actions/upload-release-asset@v1
@@ -104,6 +103,8 @@ jobs:
           asset_path: local-server/target/local-server.jar
           asset_name: local-server.jar
           asset_content_type: application/java-archive
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Upload local-server.exe
         uses: actions/upload-release-asset@v1
         with:
@@ -111,3 +112,5 @@ jobs:
           asset_path: rust-wrapper/target/release/local-server.exe
           asset_name: local-server.exe
           asset_content_type: application/octet-stream
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
