@@ -17,6 +17,16 @@ jobs:
     runs-on: windows-latest
 
     steps:
+      - name: Create GitHub Release test
+        id: create_release
+        uses: actions/create-release@v1
+        with:
+          tag_name: "release-${{ github.sha }}"
+          release_name: "Release ${{ github.sha }}"
+          draft: false
+          prerelease: false
+          token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -95,6 +105,7 @@ jobs:
           release_name: "Release ${{ github.sha }}"
           draft: false
           prerelease: false
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload local-server.jar
         uses: actions/upload-release-asset@v1
