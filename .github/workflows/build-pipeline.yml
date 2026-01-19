@@ -105,7 +105,7 @@ jobs:
           find rust-wrapper/target/release -maxdepth 1 -type f -executable
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: build-artifacts
           path: |
