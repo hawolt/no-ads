@@ -1,0 +1,135 @@
+name: Build Pipeline
+
+on:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Cache Maven dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2
+
+      - name: Build local-server with Maven
+        run: |
+          cd local-server
+          mvn clean package -DskipTests
+          echo "Maven build completed"
+          ls -la target/
+
+      - name: Verify application.jar exists
+        run: |
+          if [ -f "local-server/target/application.jar" ]; then
+            echo "application.jar found"
+            ls -la local-server/target/application.jar
+          else
+            echo "Looking for JAR files in target directory:"
+            find local-server/target -name "*.jar" -type f
+            # Try to find the main jar file (usually has the project name)
+            JAR_FILE=$(find local-server/target -name "*.jar" -not -name "*sources*" -not -name "*javadoc*" | head -n 1)
+            if [ -n "$JAR_FILE" ]; then
+              echo "Found JAR file: $JAR_FILE"
+              cp "$JAR_FILE" local-server/target/application.jar
+              echo "Renamed to application.jar"
+            else
+              echo "No suitable JAR file found"
+              exit 1
+            fi
+          fi
+
+      - name: Download JRE
+        run: |
+          echo "Downloading JRE 17.0.17 from Red Hat..."
+          curl -L -o jre-17.0.17-x64.zip "https://download.developers.redhat.com/openjdk/releases/jre-17.0.17-x64.zip"
+          echo "JRE download completed"
+          ls -la jre-17.0.17-x64.zip
+
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          default: true
+          override: true
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            rust-wrapper/target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Prepare files for Rust build
+        run: |
+          echo "Preparing files for Rust wrapper..."
+          # Copy application.jar to rust-wrapper directory
+          cp local-server/target/application.jar rust-wrapper/
+          # Copy JRE zip to rust-wrapper directory  
+          cp jre-17.0.17-x64.zip rust-wrapper/jre.zip
+          
+          echo "Files prepared for Rust build:"
+          ls -la rust-wrapper/application.jar rust-wrapper/jre.zip
+
+      - name: Build Rust wrapper
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release --manifest-path rust-wrapper/Cargo.toml
+
+      - name: Verify Rust build output
+        run: |
+          echo "Rust build completed. Checking output:"
+          ls -la rust-wrapper/target/release/
+          # Find the executable (usually same name as package in Cargo.toml)
+          find rust-wrapper/target/release -maxdepth 1 -type f -executable
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: build-artifacts
+          path: |
+            local-server/target/application.jar
+            jre-17.0.17-x64.zip
+            rust-wrapper/target/release/
+          retention-days: 30
+
+      - name: Create release assets (on main branch)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          mkdir -p release-assets
+          cp local-server/target/application.jar release-assets/
+          cp jre-17.0.17-x64.zip release-assets/jre.zip
+          # Copy the Rust executable (adjust name as needed based on your Cargo.toml)
+          find rust-wrapper/target/release -maxdepth 1 -type f -executable -exec cp {} release-assets/ \;
+          
+          echo "Release assets prepared:"
+          ls -la release-assets/
+
+      - name: Upload release assets
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v3
+        with:
+          name: release-assets
+          path: release-assets/
+          retention-days: 90
