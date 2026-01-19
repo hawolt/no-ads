@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "Video DOM Editor",
+  "version": "1.0",
+  "description": "Modifies video elements to localhost",
+  "permissions": [
+    "activeTab"
+  ],
+  "host_permissions": [
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "*://www.twitch.tv/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_end"
+    }
+  ],
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  }
+}
