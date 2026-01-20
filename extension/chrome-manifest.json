@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Video DOM Editor",
+  "name": "Twitch Adblock",
   "version": "1.0",
-  "description": "Modifies video elements to localhost",
+  "description": "Creates a new player which serves no ads",
   "permissions": [
     "activeTab"
   ],
@@ -16,9 +16,16 @@
         "*://www.twitch.tv/*"
       ],
       "js": [
+        "hls.min.js",
         "content.js"
       ],
       "run_at": "document_end"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["hls.min.js"],
+      "matches": ["*://www.twitch.tv/*"]
     }
   ],
   "icons": {
