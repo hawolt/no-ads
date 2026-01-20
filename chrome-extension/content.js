@@ -14,6 +14,22 @@ function error(...args) {
     console.error(LOG_PREFIX, ...args);
 }
 
+function onLocationChange(callback) {
+    const pushState = history.pushState;
+    const replaceState = history.replaceState;
+
+    history.pushState = function () {
+        pushState.apply(this, arguments);
+        callback();
+    };
+
+    history.replaceState = function () {
+        replaceState.apply(this, arguments);
+        callback();
+    };
+
+    window.addEventListener('popstate', callback);
+}
 
 function getUsernameFromURL() {
     const path = window.location.pathname;
@@ -309,7 +325,8 @@ async function modifyVideoElements(liveData) {
         hls.on(Hls.Events.FRAG_LOADED, () => {
             // Immediately play new fragments
             if (newVideo.paused) {
-                newVideo.play().catch(() => {});
+                newVideo.play().catch(() => {
+                });
             }
 
             // Keep enforcing buffer limits
@@ -360,28 +377,34 @@ async function modifyVideoElements(liveData) {
     log('Ultra low-latency video player initialized');
 }
 
+let replaceButtonClicked = false;
+
 function insertReplacementButton() {
+    if (replaceButtonClicked) return;
+
     const button = document.querySelector('button[data-a-target="subscribe-button"]');
-    if (!button) {
-        error('Subscribe button not found');
+    if (!button) return;
+
+    // Prevent duplicates
+    if (button.parentNode.querySelector('[data-extension-replace-button]')) {
         return;
     }
 
     const clone = button.cloneNode(true);
     clone.style.marginLeft = '7px';
     clone.setAttribute('aria-label', 'Replace');
+    clone.setAttribute('data-extension-replace-button', 'true');
 
     const thunderSVG = `
-    <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
-      <path fill-rule="evenodd"
-        d="M13 2L3 14h7l-1 8 12-14h-7l-1-6Z"
-        clip-rule="evenodd">
-      </path>
-    </svg>
+      <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
+        <path fill-rule="evenodd"
+          d="M13 2L3 14h7l-1 8 12-14h-7l-1-6Z"
+          clip-rule="evenodd">
+        </path>
+      </svg>
     `;
 
     const firstIconWrapper = clone.querySelector('.tw-core-button-icon svg');
-
     if (firstIconWrapper) {
         firstIconWrapper.outerHTML = thunderSVG;
     }
@@ -398,8 +421,9 @@ function insertReplacementButton() {
     }
 
     clone.addEventListener('click', e => {
-        e.stopPropagation();
         e.preventDefault();
+        e.stopPropagation();
+        replaceButtonClicked = true;
         modifyVideoElements(window.extensionLiveData);
         clone.remove();
     });
@@ -407,7 +431,22 @@ function insertReplacementButton() {
     button.parentNode.insertBefore(clone, button.nextSibling);
 }
 
-// Cleanup on page unload
+function observeSubscribeButton() {
+    const observer = new MutationObserver(() => {
+        if (replaceButtonClicked) {
+            observer.disconnect();
+            return;
+        }
+
+        insertReplacementButton();
+    });
+
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+    });
+}
+
 window.addEventListener('beforeunload', () => {
     if (currentHlsInstance) {
         log('Cleaning up HLS instance on page unload');
@@ -420,25 +459,19 @@ window.addEventListener('beforeunload', () => {
     }
 });
 
+function handleNavigation() {
+    const url = location.href;
+    log('SPA navigation detected:', url);
+    replaceButtonClicked = false;
+    getLiveData().then(data => {
+        window.extensionLiveData = data;
+    });
+}
+
 (async function init() {
-    const username = getUsernameFromURL();
-    log('Extension loaded for username:', username);
-
-    const liveData = await getLiveData();
-
-    if (liveData) {
-        log('Live data received:', liveData);
-        window.extensionLiveData = liveData;
-    }
-
-    const waitForButton = setInterval(() => {
-        const button = document.querySelector('button[data-a-target="subscribe-button"]');
-        log("Waiting for subscribe button...")
-        if (!button) return;
-        log("Creating custom button...")
-        clearInterval(waitForButton);
-        insertReplacementButton();
-    }, 300);
+    handleNavigation();
+    observeSubscribeButton();
+    onLocationChange(handleNavigation);
 })();
 
 log('Video DOM Editor extension loaded for:', window.location.href);
