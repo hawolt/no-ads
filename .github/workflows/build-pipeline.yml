@@ -120,18 +120,8 @@ jobs:
         run: |
           $base = "extension"
           $chromeDir = "chrome-extension"
-          $firefoxDir = "firefox-extension"
-          
-          # Clean old dirs if they exist
-          Remove-Item -Recurse -Force $chromeDir, $firefoxDir -ErrorAction SilentlyContinue
-          
-          # Create directories
-          New-Item -ItemType Directory -Path $chromeDir | Out-Null
-          New-Item -ItemType Directory -Path $firefoxDir | Out-Null
-          
-          # Shared files (everything except manifests)
+
           $sharedFiles = @(
-            "content.js",
             "hls.min.js",
             "icon16.png",
             "icon48.png",
@@ -140,18 +130,12 @@ jobs:
           
           foreach ($file in $sharedFiles) {
             Copy-Item "$base/$file" $chromeDir
-            Copy-Item "$base/$file" $firefoxDir
           }
           
-          # Copy correct manifests
-          Copy-Item "$base/chrome-manifest.json" "$chromeDir/manifest.json"
-          Copy-Item "$base/firefox-manifest.json" "$firefoxDir/manifest.json"
-          
-          # Zip them
+          # Zip
           Compress-Archive -Path "$chromeDir/*" -DestinationPath "chromium-extension.zip"
-          Compress-Archive -Path "$firefoxDir/*" -DestinationPath "firefox-extension.zip"
           
-          Write-Host "Created chromium-extension.zip and firefox-extension.zip"
+          Write-Host "Created chromium-extension.zip
 
       - name: Upload chromium-extension.zip
         uses: actions/upload-release-asset@v1
@@ -159,16 +143,6 @@ jobs:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: chromium-extension.zip
           asset_name: chromium-extension.zip
-          asset_content_type: application/zip
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload firefox-extension.zip
-        uses: actions/upload-release-asset@v1
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: firefox-extension.zip
-          asset_name: firefox-extension.zip
           asset_content_type: application/zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
