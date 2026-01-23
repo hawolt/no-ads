@@ -207,8 +207,7 @@ public class Instance implements Runnable, FragmentCallback {
                 long epoch = Instant.parse(segments[i].split(":", 2)[1]).toEpochMilli();
                 final String url = segments[i += 2];
                 if (fragments.containsKey(epoch)) continue;
-                writer.addFragment(segments[i - 2], segments[i - 1], epoch);
-                fragments.put(epoch, url);
+                final int index = i;
                 pool.execute(() -> {
                     String extension = url.substring(url.lastIndexOf(".") + 1).split("\\?")[0];
                     IonRequest fragment = IonRequest.on(url).get();
@@ -220,6 +219,8 @@ public class Instance implements Runnable, FragmentCallback {
                                 body,
                                 StandardOpenOption.CREATE
                         );
+                        writer.addFragment(segments[index - 2], segments[index - 1], epoch);
+                        fragments.put(epoch, url);
                     } catch (IOException e) {
                         fragments.remove(epoch);
                     }
