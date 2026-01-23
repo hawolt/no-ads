@@ -4,9 +4,6 @@ on:
   push:
     branches:
       - main
-  pull_request:
-    branches:
-      - dev
 
 permissions:
   contents: write
@@ -135,7 +132,7 @@ jobs:
           # Zip
           Compress-Archive -Path "$chromeDir/*" -DestinationPath "chromium-extension.zip"
           
-          Write-Host "Created chromium-extension.zip
+          Write-Host "Created chromium-extension.zip"
 
       - name: Upload chromium-extension.zip
         uses: actions/upload-release-asset@v1
