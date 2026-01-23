@@ -46,37 +46,15 @@ public class Main {
             String username = context.pathParam("username").toLowerCase();
             String filename = context.pathParam("filename");
             Instance instance = Main.instances.get(username);
-            if (instance == null) {
-                context.status(404);
-                return;
-            }
             Path path = instance.getDirectory();
             String segment = String.format(
                     "%s/%s/%s.ts",
                     path.toString(),
                     instance.getLiveId(),
-                    filename);
-            Path file = Paths.get(segment);
-            byte[] raw = null;
-            for (int i = 0; i < 5; i++) {
-                try {
-                    raw = Files.readAllBytes(file);
-                    break;
-                } catch (java.nio.file.NoSuchFileException e) {
-                    try {
-                        Thread.sleep(200);
-                    } catch (InterruptedException ex) {
-                        Thread.currentThread().interrupt();
-                    }
-                } catch (java.io.IOException e) {
-                    Logger.error(e);
-                    break;
-                }
-            }
-            if (raw != null)
-                context.result(raw);
-            else
-                context.status(404);
+                    filename
+            );
+            byte[] raw = Files.readAllBytes(Paths.get(segment));
+            context.result(raw);
         }).get("/stream/{username}/{session}/playlist.m3u8", context -> {
             String username = context.pathParam("username").toLowerCase();
             Instance instance = Main.instances.get(username);
