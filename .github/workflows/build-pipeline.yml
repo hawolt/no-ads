@@ -1,15 +1,68 @@
+# =============================================================================
+# Build & Release Pipeline
+# =============================================================================
+#
+# This workflow handles CI/CD:
+#
+# TRIGGERS:
+#   - Push to main: Builds artifacts and creates a GitHub release
+#   - Pull requests: Runs tests only (no build/release)
+#
+# JOBS:
+#   1. test          - Runs Maven tests on PRs to validate changes
+#   2. build-windows - Builds Windows executable with embedded JRE via Rust wrapper
+#   3. build-macos   - Builds JAR for macOS/Linux
+#   4. build-extension - Packages the Chromium browser extension
+#   5. release       - Creates GitHub release with all artifacts
+#
+# ARTIFACTS PRODUCED:
+#   - local-server.exe     (Windows - self-contained with JRE)
+#   - local-server.jar     (macOS/Linux - requires Java 17)
+#   - chromium-extension.zip (Browser extension)
+#
+# =============================================================================
+
 name: Build & Release
 
 on:
   push:
     branches:
       - main
+  pull_request:
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: write
 
 jobs:
-  build-and-release:
+  # Run tests on PRs only
+  test:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Cache Maven dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2
+
+      - name: Run tests
+        run: cd local-server && mvn test
+
+  # Build and release on pushes to main
+  build-windows:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: windows-latest
 
     steps:
@@ -30,22 +83,8 @@ jobs:
           restore-keys: ${{ runner.os }}-m2
 
       - name: Build local-server with Maven
-        shell: powershell
-        run: |
-          cd local-server
-          mvn clean package -DskipTests
-          Write-Host "Maven build completed"
-          Get-ChildItem -Path target -Force
-
-      - name: Verify and rename application.jar
-        shell: powershell
-        run: |
-          $jar = Get-ChildItem -Path "local-server/target" -Filter "*.jar" |
-                 Where-Object { $_.Name -notmatch "sources|javadoc" } |
-                 Select-Object -First 1
-          if (-not $jar) { Write-Error "No JAR found"; exit 1 }
-          Copy-Item $jar.FullName "local-server/target/local-server.jar"
-          Write-Host "JAR renamed to local-server.jar"
+        run: make build
+        shell: bash
 
       - name: Download JRE
         shell: powershell
@@ -62,12 +101,11 @@ jobs:
           override: true
 
       - name: Prepare files for Rust build
-        shell: powershell
+        shell: bash
         run: |
-          Copy-Item "local-server/target/local-server.jar" "rust-wrapper/application.jar"
-          Copy-Item "jre-17.0.17-x64.zip" "rust-wrapper/jre.zip"
-          Write-Host "Files prepared for Rust build:"
-          Get-ChildItem -Path "rust-wrapper/application.jar", "rust-wrapper/jre.zip" -Force
+          cp local-server/target/application.jar rust-wrapper/application.jar
+          cp jre-17.0.17-x64.zip rust-wrapper/jre.zip
+          echo "Files prepared for Rust build"
 
       - name: Build Rust wrapper
         uses: actions-rs/cargo@v1
@@ -76,12 +114,82 @@ jobs:
           args: --release --manifest-path rust-wrapper/Cargo.toml
 
       - name: Rename Rust executable
-        shell: powershell
+        shell: bash
         run: |
-          $exe = Get-ChildItem "rust-wrapper/target/release" -Filter "*.exe" | Select-Object -First 1
-          if (-not $exe) { Write-Error "No Rust executable found"; exit 1 }
-          Copy-Item $exe.FullName "rust-wrapper/target/release/local-server.exe"
-          Write-Host "Rust executable renamed to local-server.exe"
+          mv rust-wrapper/target/release/rust-wrapper.exe rust-wrapper/target/release/local-server.exe || \
+          mv rust-wrapper/target/release/*.exe rust-wrapper/target/release/local-server.exe
+          echo "Rust executable renamed to local-server.exe"
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: local-server-windows
+          path: rust-wrapper/target/release/local-server.exe
+
+  build-macos:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Cache Maven dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2
+
+      - name: Build local-server with Maven
+        run: make build
+
+      - name: Rename JAR for release
+        run: cp local-server/target/application.jar local-server/target/local-server.jar
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: local-server-macos
+          path: local-server/target/local-server.jar
+
+  build-extension:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Package Chrome extension
+        run: make package-extension
+
+      - name: Upload extension artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: chromium-extension
+          path: chromium-extension.zip
+
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [build-windows, build-macos, build-extension]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Display structure of downloaded files
+        run: ls -R artifacts
+
       - name: Create GitHub Release
         id: create_release
         uses: actions/create-release@v1
@@ -93,53 +201,48 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload local-server.jar
+      - name: Upload local-server.exe (Windows)
         uses: actions/upload-release-asset@v1
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: local-server/target/local-server.jar
-          asset_name: local-server.jar
-          asset_content_type: application/java-archive
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Upload local-server.exe
-        uses: actions/upload-release-asset@v1
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: rust-wrapper/target/release/local-server.exe
+          asset_path: artifacts/local-server-windows/local-server.exe
           asset_name: local-server.exe
           asset_content_type: application/octet-stream
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Prepare and zip browser extensions
-        shell: powershell
-        run: |
-          $base = "extension"
-          $chromeDir = "chrome-extension"
-
-          $sharedFiles = @(
-            "hls.min.js",
-            "icon16.png",
-            "icon48.png",
-            "icon128.png"
-          )
-          
-          foreach ($file in $sharedFiles) {
-            Copy-Item "$base/$file" $chromeDir
-          }
-          
-          # Zip
-          Compress-Archive -Path "$chromeDir/*" -DestinationPath "chromium-extension.zip"
-          
-          Write-Host "Created chromium-extension.zip"
+      - name: Upload local-server.jar (macOS/Linux)
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: artifacts/local-server-macos/local-server.jar
+          asset_name: local-server.jar
+          asset_content_type: application/java-archive
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload chromium-extension.zip
         uses: actions/upload-release-asset@v1
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: chromium-extension.zip
+          asset_path: artifacts/chromium-extension/chromium-extension.zip
           asset_name: chromium-extension.zip
           asset_content_type: application/zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate workflow summary
+        run: |
+          echo "## Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Release Tag:** \`release-${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Artifacts Published" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Platform | Artifact | Description |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|----------|-------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Windows | \`local-server.exe\` | Self-contained executable with embedded JRE |" >> $GITHUB_STEP_SUMMARY
+          echo "| macOS/Linux | \`local-server.jar\` | Java archive (requires JDK 17) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Browser | \`chromium-extension.zip\` | Chromium browser extension |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** [\`${{ github.sha }}\`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }})" >> $GITHUB_STEP_SUMMARY
