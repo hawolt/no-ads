@@ -24,8 +24,13 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["hls.min.js"],
-      "matches": ["*://www.twitch.tv/*"]
+      "resources": [
+        "hls.min.js",
+        "inject-history.js"
+      ],
+      "matches": [
+        "*://www.twitch.tv/*"
+      ]
     }
   ],
   "icons": {

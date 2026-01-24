@@ -2,6 +2,9 @@ const API_BASE_URL = 'http://localhost:61616';
 
 const LOG_PREFIX = '[twitch-adblock]';
 
+let replaceButtonClicked = false;
+let currentHlsInstance = null;
+
 function log(...args) {
     console.log(LOG_PREFIX, ...args);
 }
@@ -14,26 +17,23 @@ function error(...args) {
     console.error(LOG_PREFIX, ...args);
 }
 
-function onLocationChange(callback) {
-    const pushState = history.pushState;
-    const replaceState = history.replaceState;
+const script = document.createElement("script");
+script.src = chrome.runtime.getURL("inject-history.js");
+script.type = "text/javascript";
+script.onload = () => script.remove();
+(document.head || document.documentElement).appendChild(script)
 
-    history.pushState = function () {
-        pushState.apply(this, arguments);
-        callback();
-    };
+window.addEventListener("twitch-adblock:locationchange", (e) => {
+    handleNavigation(e.detail.url);
+});
 
-    history.replaceState = function () {
-        replaceState.apply(this, arguments);
-        callback();
-    };
-
-    window.addEventListener('popstate', callback);
-}
-
-function getUsernameFromURL() {
-    const path = window.location.pathname;
-    return path.split('/').filter(segment => segment.length > 0)[0];
+function getUsernameFromURL(url) {
+    try {
+        const {pathname} = new URL(url);
+        return pathname.split("/").filter(Boolean)[0] || null;
+    } catch {
+        return null;
+    }
 }
 
 async function getFromAPI(endpoint) {
@@ -58,8 +58,8 @@ async function getFromAPI(endpoint) {
     }
 }
 
-async function getLiveData() {
-    const username = getUsernameFromURL();
+async function getLivestream(url) {
+    const username = getUsernameFromURL(url);
 
     if (!username) {
         error('No username found in URL');
@@ -67,317 +67,47 @@ async function getLiveData() {
     }
 
     log(`Fetching live data for username: ${username}`);
-    const liveData = await getFromAPI(`/live/${username}`);
-
-    return liveData;
+    return await getFromAPI(`/live/${username}`);
 }
 
-let currentHlsInstance = null;
-let latencyMonitor = null;
+function handleNavigation(url) {
+    console.log(
+        "[twitch-adblock] navigated to",
+        ":",
+        url
+    );
+    replaceButtonClicked = false;
+    observeSubscribeButton();
+    getLivestream(url).then(source => {
+        window.extensionLiveSource = source;
 
-// Ultra low-latency HLS player with aggressive optimizations
-async function modifyVideoElements(liveData) {
-    if (!liveData || !liveData.live || !liveData.playlist) {
-        log('User is not live or no playlist available - no modifications made');
-        return;
-    }
-
-    log('User is live, replacing player with ultra low-latency source:', liveData.playlist);
-
-    const playerRoot = document.querySelector('[data-a-player-state]');
-
-    if (!playerRoot) {
-        error('Player root not found');
-        return;
-    }
-
-    if (typeof Hls === 'undefined') {
-        error('HLS.js is not loaded. Make sure hls.js is included in the extension.');
-        return;
-    }
-
-    log('Removing data-a-player-state attribute to disable React control...');
-    playerRoot.removeAttribute('data-a-player-state');
-
-    const existingVideos = playerRoot.querySelectorAll('video');
-    if (!existingVideos.length) {
-        error('Error with video elements');
-        return;
-    }
-
-    const video = existingVideos[0];
-    const parent = video.parentNode;
-
-    log('Removing existing video element...');
-    video.remove();
-
-    const ref = document.querySelector('[data-a-target="video-ref"]');
-
-    if (ref) {
-        // Find child elements whose class contains the string "video"
-        const videoChild = ref.querySelector('[class*="video"]');
-
-        if (videoChild) {
-            videoChild.style.display = 'none';
+        const root = document.querySelector('[data-a-player-state]');
+        const videos = root.querySelectorAll('video');
+        if (!videos.length) {
+            log('navigated with ad-free player, replacing video element')
+            modifyVideoElement(source);
+            log('removing replace button')
+            replaceButtonClicked = true;
+            document.querySelector('[data-extension-replace-button="true"]').remove();
         }
-    }
-
-    // Cleanup previous instances
-    if (currentHlsInstance) {
-        log('Destroying previous HLS instance...');
-        currentHlsInstance.destroy();
-        currentHlsInstance = null;
-    }
-    if (latencyMonitor) {
-        clearInterval(latencyMonitor);
-        latencyMonitor = null;
-    }
-
-    const newVideo = document.createElement('video');
-
-    newVideo.controls = true;
-    newVideo.autoplay = true;
-    newVideo.playsInline = true;
-    newVideo.muted = false;
-
-    if (Hls.isSupported()) {
-        const hls = new Hls({
-            // ULTRA LOW LATENCY SETTINGS
-            debug: false,
-
-            // Buffer management - ABSOLUTE MINIMUM
-            maxBufferLength: 1,              // Only 1 second of buffer
-            maxMaxBufferLength: 2,           // Max 2 seconds total
-            maxBufferSize: 10 * 1000 * 1000, // 10MB max buffer size
-            maxBufferHole: 0.1,              // Jump over small gaps quickly
-
-            // Live sync - STAY AT LIVE EDGE (use duration-based, not count-based)
-            liveSyncDuration: 0.5,           // Stay 0.5s from live edge
-            liveMaxLatencyDuration: 2,       // Catch up if >2s behind
-
-            // Playback rate adjustment for catch-up
-            maxLiveSyncPlaybackRate: 1.3,    // Speed up to 1.3x to catch up
-            liveDurationInfinity: true,
-
-            // Fragment loading - AGGRESSIVE
-            manifestLoadingTimeOut: 5000,
-            manifestLoadingMaxRetry: 2,
-            manifestLoadingRetryDelay: 500,
-            levelLoadingTimeOut: 5000,
-            levelLoadingMaxRetry: 2,
-            levelLoadingRetryDelay: 500,
-            fragLoadingTimeOut: 10000,
-            fragLoadingMaxRetry: 3,
-            fragLoadingRetryDelay: 500,
-
-            // Start immediately at live edge
-            startPosition: -1,               // -1 = live edge
-
-            // Low latency mode
-            lowLatencyMode: true,
-            backBufferLength: 0,             // Don't keep old buffer
-
-            // Enable features for performance
-            enableWorker: true,
-            enableSoftwareAES: true,
-
-            // Aggressive buffer watching
-            highBufferWatchdogPeriod: 0.5,   // Check every 0.5s
-            nudgeMaxRetry: 5,
-
-            // ABR (Adaptive Bitrate) - prefer speed over quality
-            abrEwmaDefaultEstimate: 500000,  // Start with moderate quality
-            abrBandWidthFactor: 0.8,         // More conservative bandwidth usage
-            abrBandWidthUpFactor: 0.5,       // Slower quality increase
-            abrMaxWithRealBitrate: true,
-
-            // Fragment prefetch
-            progressive: true
-        });
-
-        currentHlsInstance = hls;
-
-        hls.loadSource(liveData.playlist);
-        hls.attachMedia(newVideo);
-
-        // Aggressive live edge seeking
-        let manifestParsed = false;
-
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
-            log('HLS manifest parsed, jumping to live edge');
-            manifestParsed = true;
-
-            // Force immediate playback at live edge
-            newVideo.play().catch(err => {
-                error('Error playing video:', err);
-            });
-        });
-
-        // Monitor and enforce live edge position
-        hls.on(Hls.Events.LEVEL_UPDATED, (event, data) => {
-            if (!manifestParsed || !newVideo.duration) return;
-
-            const latency = data.edge - newVideo.currentTime;
-
-            if (latency > 3) {
-                // More than 3 seconds behind - jump to live edge
-                log(`Latency too high (${latency.toFixed(2)}s), jumping to live edge`);
-                newVideo.currentTime = data.edge - 0.5;
-            } else if (latency > 1.5) {
-                // 1.5-3 seconds behind - speed up playback
-                if (newVideo.playbackRate < 1.2) {
-                    log(`Latency high (${latency.toFixed(2)}s), speeding up playback`);
-                    newVideo.playbackRate = 1.2;
-                }
-            } else if (latency < 0.3) {
-                // Too close to edge - slow down slightly
-                if (newVideo.playbackRate > 1.0) {
-                    newVideo.playbackRate = 1.0;
-                }
-            } else {
-                // In acceptable range - normalize speed
-                if (newVideo.playbackRate !== 1.0) {
-                    newVideo.playbackRate = 1.0;
-                }
-            }
-        });
-
-        // Additional latency monitoring with aggressive buffer control
-        let lastLogTime = 0;
-        let lastPruneTime = 0;
-        latencyMonitor = setInterval(() => {
-            if (!newVideo.paused && newVideo.duration && manifestParsed) {
-                const bufferEnd = newVideo.buffered.length > 0
-                    ? newVideo.buffered.end(newVideo.buffered.length - 1)
-                    : 0;
-                const currentLatency = bufferEnd - newVideo.currentTime;
-
-                // Log every 5 seconds
-                const now = Date.now();
-                if (now - lastLogTime > 5000) {
-                    log(`Latency: ${currentLatency.toFixed(2)}s | Buffer: ${bufferEnd.toFixed(2)}s | Current: ${newVideo.currentTime.toFixed(2)}s | Rate: ${newVideo.playbackRate.toFixed(2)}x`);
-                    lastLogTime = now;
-                }
-
-                // AGGRESSIVE BUFFER PRUNING - Force HLS.js to trim buffer
-                if (currentLatency > 2 && now - lastPruneTime > 1000) {
-                    log('Forcing buffer flush - too much buffered ahead');
-                    // Jump closer to live edge
-                    newVideo.currentTime = bufferEnd - 1;
-                    lastPruneTime = now;
-                }
-
-                // Emergency catch-up if we fall too far behind
-                if (currentLatency > 4) {
-                    warn('Emergency catch-up: jumping forward');
-                    newVideo.currentTime = bufferEnd - 0.5;
-                }
-            }
-        }, 500);
-
-        // Handle buffering/stalling
-        let stallCount = 0;
-        newVideo.addEventListener('waiting', () => {
-            log('Video buffering...');
-            stallCount++;
-
-            // If stalling too much, try to recover
-            if (stallCount > 3) {
-                warn('Too many stalls, attempting recovery');
-                hls.startLoad();
-                stallCount = 0;
-            }
-        });
-
-        newVideo.addEventListener('playing', () => {
-            log('Video playing');
-            stallCount = 0; // Reset stall counter
-        });
-
-        // Error handling
-        hls.on(Hls.Events.ERROR, (event, data) => {
-            error('HLS error:', data);
-
-            if (data.fatal) {
-                switch (data.type) {
-                    case Hls.ErrorTypes.NETWORK_ERROR:
-                        log('Network error, attempting recovery...');
-                        hls.startLoad();
-                        break;
-                    case Hls.ErrorTypes.MEDIA_ERROR:
-                        log('Media error, attempting recovery...');
-                        hls.recoverMediaError();
-                        break;
-                    default:
-                        error('Fatal error, destroying HLS instance');
-                        hls.destroy();
-                        currentHlsInstance = null;
-                        if (latencyMonitor) {
-                            clearInterval(latencyMonitor);
-                            latencyMonitor = null;
-                        }
-                        break;
-                }
-            }
-        });
-
-        // Fragment loading optimization with buffer control
-        hls.on(Hls.Events.FRAG_LOADED, () => {
-            // Immediately play new fragments
-            if (newVideo.paused) {
-                newVideo.play().catch(() => {
-                });
-            }
-
-            // Keep enforcing buffer limits
-            if (newVideo.buffered.length > 0) {
-                const bufferEnd = newVideo.buffered.end(newVideo.buffered.length - 1);
-                const bufferStart = newVideo.buffered.start(0);
-                const totalBuffered = bufferEnd - newVideo.currentTime;
-
-                // If we have more than 2s buffered ahead, seek closer to live
-                if (totalBuffered > 2.5) {
-                    log(`Buffer too large (${totalBuffered.toFixed(2)}s), seeking to live edge`);
-                    newVideo.currentTime = bufferEnd - 1;
-                }
-            }
-        });
-
-        hls.on(Hls.Events.BUFFER_FLUSHED, () => {
-            log('Buffer flushed');
-        });
-
-    } else if (newVideo.canPlayType('application/vnd.apple.mpegurl')) {
-        log('Using native HLS support (Safari)');
-        newVideo.src = liveData.playlist;
-    } else {
-        error('HLS is not supported in this browser');
-        return;
-    }
-
-    newVideo.addEventListener('play', () => {
-        log('Video started playing');
     });
-
-    newVideo.addEventListener('pause', () => {
-        log('Video paused');
-    });
-
-    newVideo.addEventListener('error', (e) => {
-        error('Video error:', e, newVideo.error);
-    });
-
-    newVideo.addEventListener('loadeddata', () => {
-        log('Video loaded successfully');
-    });
-
-    log('Adding new video element to player container...');
-    parent.appendChild(newVideo);
-
-    log('Ultra low-latency video player initialized');
 }
 
-let replaceButtonClicked = false;
+function observeSubscribeButton() {
+    const observer = new MutationObserver(() => {
+        if (replaceButtonClicked) {
+            observer.disconnect();
+            return;
+        }
+
+        insertReplacementButton();
+    });
+
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+    });
+}
 
 function insertReplacementButton() {
     if (replaceButtonClicked) return;
@@ -385,7 +115,6 @@ function insertReplacementButton() {
     const button = document.querySelector('button[data-a-target="subscribe-button"]');
     if (!button) return;
 
-    // Prevent duplicates
     if (button.parentNode.querySelector('[data-extension-replace-button]')) {
         return;
     }
@@ -424,54 +153,101 @@ function insertReplacementButton() {
         e.preventDefault();
         e.stopPropagation();
         replaceButtonClicked = true;
-        modifyVideoElements(window.extensionLiveData);
+        modifyVideoElement(window.extensionLiveSource);
         clone.remove();
     });
 
     button.parentNode.insertBefore(clone, button.nextSibling);
 }
 
-function observeSubscribeButton() {
-    const observer = new MutationObserver(() => {
-        if (replaceButtonClicked) {
-            observer.disconnect();
-            return;
+function modifyVideoElement(source) {
+    if (!source || !source.live || !source.playlist) {
+        log('User is not live or no playlist available - no modifications made');
+        return;
+    }
+
+    const root = document.querySelector('[data-a-player-state]');
+
+    if (!root) {
+        error('Player root not found');
+        return;
+    }
+
+    if (typeof Hls === 'undefined') {
+        error('HLS.js is not loaded.');
+        return;
+
+    }
+
+    log('Removing data-a-player-state attribute to disable React control...');
+    root.removeAttribute('data-a-player-state');
+
+    let videos = root.querySelectorAll('video');
+
+    if (!videos.length) {
+        videos = document.querySelectorAll('video');
+    }
+
+    if (!videos.length) {
+        error('No video elements found in the DOM');
+        return;
+    }
+
+    const video = videos[0];
+    const parent = video.parentNode;
+
+    log('Removing existing video element...');
+    video.remove();
+
+    const ref = document.querySelector('[data-a-target="video-ref"]');
+
+    if (ref) {
+        const videoChild = ref.querySelector('[class*="video"]');
+
+        if (videoChild) {
+            videoChild.style.display = 'none';
         }
+    }
 
-        insertReplacementButton();
-    });
-
-    observer.observe(document.body, {
-        childList: true,
-        subtree: true,
-    });
-}
-
-window.addEventListener('beforeunload', () => {
     if (currentHlsInstance) {
-        log('Cleaning up HLS instance on page unload');
+        log('Destroying previous HLS instance...');
         currentHlsInstance.destroy();
         currentHlsInstance = null;
     }
-    if (latencyMonitor) {
-        clearInterval(latencyMonitor);
-        latencyMonitor = null;
-    }
-});
 
-function handleNavigation() {
-    const url = location.href;
-    log('SPA navigation detected:', url);
-    replaceButtonClicked = false;
-    getLiveData().then(data => {
-        window.extensionLiveData = data;
-    });
+    const inject = document.createElement('video');
+
+    inject.playsInline = true;
+    inject.controls = true;
+    inject.autoplay = true;
+    inject.muted = false;
+
+    if (Hls.isSupported()) {
+        const hls = new Hls({
+            lowLatencyMode: true,
+
+            liveSyncDurationCount: 2,
+            liveMaxLatencyDurationCount: 4,
+
+            backBufferLength: 30,
+            maxBufferLength: 60,
+            maxBufferSize: 30 * 1000 * 1000,
+
+            liveDurationInfinity: true
+        });
+
+        currentHlsInstance = hls;
+
+        hls.loadSource(source.playlist);
+        hls.attachMedia(inject);
+    } else {
+        console.error("HLS does not seem to be supported...")
+    }
+
+    parent.appendChild(inject);
 }
 
-(async function init() {
-    handleNavigation();
-    observeSubscribeButton();
-    onLocationChange(handleNavigation);
-})();
+log('extension loaded');
 
-log('Video DOM Editor extension loaded for:', window.location.href);
+handleNavigation(window.location.href);
+observeSubscribeButton();
