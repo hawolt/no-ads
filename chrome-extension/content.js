@@ -29,6 +29,17 @@ function onLocationChange(callback) {
     };
 
     window.addEventListener('popstate', callback);
+
+    // Poll as fallback for Twitch SPA routing
+    let lastUrl = location.href;
+    setInterval(() => {
+        const currentUrl = location.href;
+        if (currentUrl !== lastUrl) {
+            log('URL change detected via polling:', currentUrl);
+            lastUrl = currentUrl;
+            callback();
+        }
+    }, 500);
 }
 
 function getUsernameFromURL() {
@@ -78,11 +89,11 @@ let latencyMonitor = null;
 // Ultra low-latency HLS player with aggressive optimizations
 async function modifyVideoElements(liveData) {
     if (!liveData || !liveData.live || !liveData.playlist) {
-        log('User is not live or no playlist available - no modifications made');
+        log('User is not live or no playlist available');
         return;
     }
 
-    log('User is live, replacing player with ultra low-latency source:', liveData.playlist);
+    log('Replacing player with low-latency source:', liveData.playlist);
 
     const playerRoot = document.querySelector('[data-a-player-state]');
 
@@ -142,53 +153,37 @@ async function modifyVideoElements(liveData) {
 
     if (Hls.isSupported()) {
         const hls = new Hls({
-            // ULTRA LOW LATENCY SETTINGS
+            // MODERATE LOW LATENCY - balance between latency and stability
             debug: false,
-
-            // Buffer management - ABSOLUTE MINIMUM
-            maxBufferLength: 1,              // Only 1 second of buffer
-            maxMaxBufferLength: 2,           // Max 2 seconds total
-            maxBufferSize: 10 * 1000 * 1000, // 10MB max buffer size
-            maxBufferHole: 0.1,              // Jump over small gaps quickly
-
-            // Live sync - STAY AT LIVE EDGE (use duration-based, not count-based)
-            liveSyncDuration: 0.5,           // Stay 0.5s from live edge
-            liveMaxLatencyDuration: 2,       // Catch up if >2s behind
-
-            // Playback rate adjustment for catch-up
-            maxLiveSyncPlaybackRate: 1.3,    // Speed up to 1.3x to catch up
+            maxBufferLength: 4,
+            maxMaxBufferLength: 10,
+            maxBufferSize: 30 * 1000 * 1000,
+            maxBufferHole: 0.3,
+            liveSyncDuration: 2,
+            liveMaxLatencyDuration: 8,
+            maxLiveSyncPlaybackRate: 1.2,
             liveDurationInfinity: true,
 
-            // Fragment loading - AGGRESSIVE
-            manifestLoadingTimeOut: 5000,
-            manifestLoadingMaxRetry: 2,
-            manifestLoadingRetryDelay: 500,
-            levelLoadingTimeOut: 5000,
-            levelLoadingMaxRetry: 2,
-            levelLoadingRetryDelay: 500,
-            fragLoadingTimeOut: 10000,
-            fragLoadingMaxRetry: 3,
-            fragLoadingRetryDelay: 500,
-
-            // Start immediately at live edge
-            startPosition: -1,               // -1 = live edge
-
-            // Low latency mode
+            // Fragment loading - moderate tolerance
+            manifestLoadingTimeOut: 8000,
+            manifestLoadingMaxRetry: 3,
+            manifestLoadingRetryDelay: 750,
+            levelLoadingTimeOut: 8000,
+            levelLoadingMaxRetry: 3,
+            levelLoadingRetryDelay: 750,
+            fragLoadingTimeOut: 15000,
+            fragLoadingMaxRetry: 4,
+            fragLoadingRetryDelay: 750,
+            startPosition: -1,
             lowLatencyMode: true,
-            backBufferLength: 0,             // Don't keep old buffer
-
-            // Enable features for performance
+            backBufferLength: 10,
             enableWorker: true,
             enableSoftwareAES: true,
-
-            // Aggressive buffer watching
-            highBufferWatchdogPeriod: 0.5,   // Check every 0.5s
-            nudgeMaxRetry: 5,
-
-            // ABR (Adaptive Bitrate) - prefer speed over quality
-            abrEwmaDefaultEstimate: 500000,  // Start with moderate quality
-            abrBandWidthFactor: 0.8,         // More conservative bandwidth usage
-            abrBandWidthUpFactor: 0.5,       // Slower quality increase
+            highBufferWatchdogPeriod: 1.5,
+            nudgeMaxRetry: 8,
+            abrEwmaDefaultEstimate: 800000,
+            abrBandWidthFactor: 0.85,
+            abrBandWidthUpFactor: 0.6,
             abrMaxWithRealBitrate: true,
 
             // Fragment prefetch
@@ -213,36 +208,26 @@ async function modifyVideoElements(liveData) {
             });
         });
 
-        // Monitor and enforce live edge position
+        // Monitor and enforce live edge position - moderate thresholds
         hls.on(Hls.Events.LEVEL_UPDATED, (event, data) => {
             if (!manifestParsed || !newVideo.duration) return;
 
             const latency = data.edge - newVideo.currentTime;
 
-            if (latency > 3) {
-                // More than 3 seconds behind - jump to live edge
+            if (latency > 12) {
                 log(`Latency too high (${latency.toFixed(2)}s), jumping to live edge`);
-                newVideo.currentTime = data.edge - 0.5;
-            } else if (latency > 1.5) {
-                // 1.5-3 seconds behind - speed up playback
-                if (newVideo.playbackRate < 1.2) {
+                newVideo.currentTime = data.edge - 3;
+            } else if (latency > 8) {
+                if (newVideo.playbackRate < 1.1) {
                     log(`Latency high (${latency.toFixed(2)}s), speeding up playback`);
-                    newVideo.playbackRate = 1.2;
+                    newVideo.playbackRate = 1.1;
                 }
-            } else if (latency < 0.3) {
-                // Too close to edge - slow down slightly
-                if (newVideo.playbackRate > 1.0) {
-                    newVideo.playbackRate = 1.0;
-                }
-            } else {
-                // In acceptable range - normalize speed
-                if (newVideo.playbackRate !== 1.0) {
-                    newVideo.playbackRate = 1.0;
-                }
+            } else if (newVideo.playbackRate !== 1.0) {
+                newVideo.playbackRate = 1.0;
             }
         });
 
-        // Additional latency monitoring with aggressive buffer control
+        // Latency monitoring - moderate intervention
         let lastLogTime = 0;
         let lastPruneTime = 0;
         latencyMonitor = setInterval(() => {
@@ -252,28 +237,26 @@ async function modifyVideoElements(liveData) {
                     : 0;
                 const currentLatency = bufferEnd - newVideo.currentTime;
 
-                // Log every 5 seconds
+                // Log every 15 seconds
                 const now = Date.now();
-                if (now - lastLogTime > 5000) {
+                if (now - lastLogTime > 15000) {
                     log(`Latency: ${currentLatency.toFixed(2)}s | Buffer: ${bufferEnd.toFixed(2)}s | Current: ${newVideo.currentTime.toFixed(2)}s | Rate: ${newVideo.playbackRate.toFixed(2)}x`);
                     lastLogTime = now;
                 }
 
-                // AGGRESSIVE BUFFER PRUNING - Force HLS.js to trim buffer
-                if (currentLatency > 2 && now - lastPruneTime > 1000) {
-                    log('Forcing buffer flush - too much buffered ahead');
-                    // Jump closer to live edge
-                    newVideo.currentTime = bufferEnd - 1;
+                // Intervene if buffer gets too large
+                if (currentLatency > 8 && now - lastPruneTime > 5000) {
+                    log('Buffer large, seeking closer to live edge');
+                    newVideo.currentTime = bufferEnd - 3;
                     lastPruneTime = now;
                 }
 
-                // Emergency catch-up if we fall too far behind
-                if (currentLatency > 4) {
+                if (currentLatency > 15) {
                     warn('Emergency catch-up: jumping forward');
-                    newVideo.currentTime = bufferEnd - 0.5;
+                    newVideo.currentTime = bufferEnd - 2;
                 }
             }
-        }, 500);
+        }, 3000);
 
         // Handle buffering/stalling
         let stallCount = 0;
@@ -296,55 +279,48 @@ async function modifyVideoElements(liveData) {
 
         // Error handling
         hls.on(Hls.Events.ERROR, (event, data) => {
-            error('HLS error:', data);
-
-            if (data.fatal) {
-                switch (data.type) {
-                    case Hls.ErrorTypes.NETWORK_ERROR:
-                        log('Network error, attempting recovery...');
-                        hls.startLoad();
-                        break;
-                    case Hls.ErrorTypes.MEDIA_ERROR:
-                        log('Media error, attempting recovery...');
-                        hls.recoverMediaError();
-                        break;
-                    default:
-                        error('Fatal error, destroying HLS instance');
-                        hls.destroy();
-                        currentHlsInstance = null;
-                        if (latencyMonitor) {
-                            clearInterval(latencyMonitor);
-                            latencyMonitor = null;
-                        }
-                        break;
+            // Non-fatal errors - handle gracefully without logging as errors
+            if (!data.fatal) {
+                // bufferStalledError is common during live streaming, HLS.js handles it automatically
+                if (data.details === 'bufferStalledError') {
+                    // Silent - these are expected and auto-recover
+                    return;
                 }
+                // Log other non-fatal errors as warnings for debugging
+                warn('HLS warning:', data.type, data.details);
+                return;
+            }
+
+            // Fatal errors - log with details and attempt recovery
+            error('HLS fatal error:', data.type, data.details);
+
+            switch (data.type) {
+                case Hls.ErrorTypes.NETWORK_ERROR:
+                    log('Network error, attempting recovery...');
+                    hls.startLoad();
+                    break;
+                case Hls.ErrorTypes.MEDIA_ERROR:
+                    log('Media error, attempting recovery...');
+                    hls.recoverMediaError();
+                    break;
+                default:
+                    error('Unrecoverable error, destroying HLS instance');
+                    hls.destroy();
+                    currentHlsInstance = null;
+                    if (latencyMonitor) {
+                        clearInterval(latencyMonitor);
+                        latencyMonitor = null;
+                    }
+                    break;
             }
         });
 
-        // Fragment loading optimization with buffer control
+        // Fragment loading - resume playback if paused
         hls.on(Hls.Events.FRAG_LOADED, () => {
             // Immediately play new fragments
             if (newVideo.paused) {
-                newVideo.play().catch(() => {
-                });
+                newVideo.play().catch(() => {});
             }
-
-            // Keep enforcing buffer limits
-            if (newVideo.buffered.length > 0) {
-                const bufferEnd = newVideo.buffered.end(newVideo.buffered.length - 1);
-                const bufferStart = newVideo.buffered.start(0);
-                const totalBuffered = bufferEnd - newVideo.currentTime;
-
-                // If we have more than 2s buffered ahead, seek closer to live
-                if (totalBuffered > 2.5) {
-                    log(`Buffer too large (${totalBuffered.toFixed(2)}s), seeking to live edge`);
-                    newVideo.currentTime = bufferEnd - 1;
-                }
-            }
-        });
-
-        hls.on(Hls.Events.BUFFER_FLUSHED, () => {
-            log('Buffer flushed');
         });
 
     } else if (newVideo.canPlayType('application/vnd.apple.mpegurl')) {
@@ -425,7 +401,42 @@ function insertReplacementButton() {
         e.stopPropagation();
         replaceButtonClicked = true;
         modifyVideoElements(window.extensionLiveData);
-        clone.remove();
+
+        // Convert to Revert button
+        clone.setAttribute('aria-label', 'Revert');
+        clone.setAttribute('data-extension-revert-button', 'true');
+        clone.removeAttribute('data-extension-replace-button');
+
+        // Update icon to a refresh/revert icon
+        const revertSVG = `
+          <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
+            <path fill-rule="evenodd"
+              d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8Z"
+              clip-rule="evenodd">
+            </path>
+          </svg>
+        `;
+
+        const iconWrapper = clone.querySelector('.tw-core-button-icon svg');
+        if (iconWrapper) {
+            iconWrapper.outerHTML = revertSVG;
+        }
+
+        const revertLabel = clone.querySelector('[data-a-target="tw-core-button-label-text"]');
+        if (revertLabel) {
+            revertLabel.textContent = 'Revert';
+        }
+
+        // Replace click handler with revert functionality
+        const newClone = clone.cloneNode(true);
+        clone.parentNode.replaceChild(newClone, clone);
+
+        newClone.addEventListener('click', e => {
+            e.preventDefault();
+            e.stopPropagation();
+            log('Reverting to original Twitch player...');
+            location.reload();
+        });
     });
 
     button.parentNode.insertBefore(clone, button.nextSibling);
@@ -459,12 +470,46 @@ window.addEventListener('beforeunload', () => {
     }
 });
 
+let lastHandledUrl = null;  // Start as null so first call always runs
+
 function handleNavigation() {
     const url = location.href;
-    log('SPA navigation detected:', url);
+
+    // Check if this is a URL change (not initial load)
+    const isUrlChange = lastHandledUrl !== null && url !== lastHandledUrl;
+
+    if (isUrlChange) {
+        log('SPA navigation detected:', url);
+
+        // If we had replaced the player, reload for clean state
+        if (currentHlsInstance || replaceButtonClicked) {
+            log('Reloading page to restore clean player state');
+            if (currentHlsInstance) {
+                currentHlsInstance.destroy();
+                currentHlsInstance = null;
+            }
+            if (latencyMonitor) {
+                clearInterval(latencyMonitor);
+                latencyMonitor = null;
+            }
+            location.reload();
+            return;
+        }
+    }
+
+    // Skip if URL hasn't changed (for polling calls)
+    if (lastHandledUrl === url) {
+        return;
+    }
+
+    lastHandledUrl = url;
+
     replaceButtonClicked = false;
+
+    log('Fetching live data for:', url);
     getLiveData().then(data => {
         window.extensionLiveData = data;
+        log('Live data loaded:', data);
     });
 }
 
