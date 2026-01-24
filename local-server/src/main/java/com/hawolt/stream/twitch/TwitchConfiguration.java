@@ -1,9 +1,6 @@
 package com.hawolt.stream.twitch;
 
-import com.hawolt.stream.exceptions.TwitchInitializationException;
 import com.hawolt.stream.exceptions.TwitchScriptException;
-
-import java.io.IOException;
 import java.util.regex.Pattern;
 
 public class TwitchConfiguration {
