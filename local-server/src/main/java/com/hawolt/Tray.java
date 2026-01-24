@@ -10,7 +10,6 @@ import java.io.InputStream;
 public class Tray {
     public static void create() {
         if (!SystemTray.isSupported()) {
-            System.err.println("System tray not supported!");
             return;
         }
 
@@ -24,20 +23,16 @@ public class Tray {
 
         InputStream iconStream = Tray.class.getResourceAsStream("/icon.png");
         if (iconStream == null) {
-            System.err.println("Icon resource not found!");
             return;
         }
 
         try {
             Image image = ImageIO.read(iconStream);
-            TrayIcon trayIcon = new TrayIcon(image, "no-ads", popup);
-
+            TrayIcon trayIcon = new TrayIcon(image, "twitch-adblock", popup);
             trayIcon.setImageAutoSize(true);
-
             tray.add(trayIcon);
         } catch (AWTException | IOException e) {
-            System.err.println("Unable to add tray icon.");
-            Logger.error(e);
+            // ignored
         }
     }
 }
