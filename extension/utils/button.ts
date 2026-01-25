@@ -1,12 +1,6 @@
 import type { LiveSource } from './types';
 import { modifyVideoElement } from './player';
 
-const LOG_PREFIX = '[twitch-adblock]';
-
-function log(...args: unknown[]) {
-  console.log(LOG_PREFIX, ...args);
-}
-
 const THUNDER_SVG = `
   <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
     <path fill-rule="evenodd"
@@ -29,7 +23,6 @@ export function insertReplacementButton(
     return true; // Already inserted
   }
 
-  log('Found subscribe button, inserting replace button');
 
   const clone = button.cloneNode(true) as HTMLElement;
   clone.style.marginLeft = '7px';
@@ -61,14 +54,9 @@ export function insertReplacementButton(
   });
 
   button.parentNode?.insertBefore(clone, button.nextSibling);
-  log('Replace button inserted successfully');
   return true;
 }
 
 export function removeReplaceButton(): void {
-  const button = document.querySelector('[data-extension-replace-button="true"]');
-  if (button) {
-    log('removing replace button');
-    button.remove();
-  }
+  document.querySelector('[data-extension-replace-button="true"]')?.remove();
 }
