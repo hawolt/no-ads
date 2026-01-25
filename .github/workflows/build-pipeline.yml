@@ -61,6 +61,11 @@ jobs:
           default: true
           override: true
 
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
       - name: Prepare files for Rust build
         shell: powershell
         run: |
@@ -82,6 +87,25 @@ jobs:
           if (-not $exe) { Write-Error "No Rust executable found"; exit 1 }
           Copy-Item $exe.FullName "rust-wrapper/target/release/local-server.exe"
           Write-Host "Rust executable renamed to local-server.exe"
+
+      - name: Install extension dependencies
+        shell: bash
+        run: |
+          cd extension
+          bun install
+
+      - name: Build and zip Chrome extension
+        shell: bash
+        run: |
+          cd extension
+          bun run zip
+
+      - name: Build and zip Firefox extension
+        shell: bash
+        run: |
+          cd extension
+          bun run zip:firefox
+
       - name: Create GitHub Release
         id: create_release
         uses: actions/create-release@v1
@@ -112,34 +136,22 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Prepare and zip browser extensions
-        shell: powershell
-        run: |
-          $base = "extension"
-          $chromeDir = "chrome-extension"
-
-          $sharedFiles = @(
-            "hls.min.js",
-            "icon16.png",
-            "icon48.png",
-            "icon128.png"
-          )
-          
-          foreach ($file in $sharedFiles) {
-            Copy-Item "$base/$file" $chromeDir
-          }
-          
-          # Zip
-          Compress-Archive -Path "$chromeDir/*" -DestinationPath "chromium-extension.zip"
-          
-          Write-Host "Created chromium-extension.zip"
-
-      - name: Upload chromium-extension.zip
+      - name: Upload Chrome extension zip
         uses: actions/upload-release-asset@v1
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: chromium-extension.zip
-          asset_name: chromium-extension.zip
+          asset_path: extension/.output/twitch-adblock-1.0.0-chrome.zip
+          asset_name: twitch-adblock-chrome.zip
+          asset_content_type: application/zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Firefox extension zip
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: extension/.output/twitch-adblock-1.0.0-firefox.zip
+          asset_name: twitch-adblock-firefox.zip
           asset_content_type: application/zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
