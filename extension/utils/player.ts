@@ -48,7 +48,7 @@ export async function modifyVideoElement() {
   inject.muted = false;
 
   try {
-    
+
     // liveSyncDuration of sub 2 is not possible due to twitch segments being 2 seconds long
     // twitch has its own player which supports binary streams unlike hls.js which requires a full segment
     // thus liveSyncDuration: 2.5 will achieve:
@@ -83,7 +83,8 @@ export async function modifyVideoElement() {
     hls.on(Hls.Events.MANIFEST_PARSED, () => {
       inject.play().catch(() => {});
     });
-
+    
+    parent.appendChild(inject);
   } catch (err) {
     logger.error('[twitch-adblock] Failed to set up player:', err);
   }
