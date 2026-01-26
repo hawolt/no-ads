@@ -1,10 +1,15 @@
 import Hls from 'hls.js';
-import type { LiveSource } from './types';
+import { logger } from './logger';
+import { getLivestream } from "@/utils/api";
 
 let currentHlsInstance: Hls | null = null;
 
-export function modifyVideoElement(source: LiveSource | null): void {
+export async function modifyVideoElement() {
+  const source: LiveSource | null = await getLivestream(window.location.href);
+
   if (!source || !source.live || !source.playlist) return;
+
+  logger.info("using source:", source);
 
   const root = document.querySelector('[data-a-player-state]');
   if (!root || !Hls.isSupported()) return;
@@ -43,14 +48,26 @@ export function modifyVideoElement(source: LiveSource | null): void {
   inject.muted = false;
 
   try {
+    
+    // liveSyncDuration of sub 2 is not possible due to twitch segments being 2 seconds long
+    // twitch has its own player which supports binary streams unlike hls.js which requires a full segment
+    // thus liveSyncDuration: 2.5 will achieve:
+    // 1. jump to the latest segment
+    // 2. fail to fetch it when not jet present, with a return code of 500 as the file is not available when requested
+    // 3. buffer once or twice until we are stable with 2-4 seconds delay behind the actual stream
+    // 4. if we fall behind further than 4 seconds liveMaxLatencyDuration: 4 will cause rebuffering
+
     const hls = new Hls({
       lowLatencyMode: true,
-      liveSyncDurationCount: 2,
-      liveMaxLatencyDurationCount: 4,
-      backBufferLength: 30,
-      maxBufferLength: 60,
-      maxBufferSize: 30 * 1000 * 1000,
+      liveSyncDuration: 2.5,
+      liveMaxLatencyDuration: 4,
+      backBufferLength: 0,
+      maxBufferLength: 6,
+      maxBufferSize: 10 * 1000 * 1000,
       liveDurationInfinity: true,
+      enableWorker: true,
+      abrEwmaFastLive: 3,
+      abrEwmaSlowLive: 9,
     });
 
     currentHlsInstance = hls;
@@ -59,7 +76,7 @@ export function modifyVideoElement(source: LiveSource | null): void {
 
     hls.on(Hls.Events.ERROR, (_event, data) => {
       if (data.fatal) {
-        console.error('[twitch-adblock] HLS fatal error:', data.type, data.details);
+        logger.error('[twitch-adblock] HLS fatal error:', data.type, data.details);
       }
     });
 
@@ -67,9 +84,8 @@ export function modifyVideoElement(source: LiveSource | null): void {
       inject.play().catch(() => {});
     });
 
-    parent.appendChild(inject);
   } catch (err) {
-    console.error('[twitch-adblock] Failed to set up player:', err);
+    logger.error('[twitch-adblock] Failed to set up player:', err);
   }
 }
 

@@ -1,34 +1,20 @@
 import { injectScript } from 'wxt/utils/inject-script';
-import type { LiveSource, LocationChangeDetail } from '@/utils/types';
-import { getLivestream } from '@/utils/api';
-import { modifyVideoElement, hasVideoElements } from '@/utils/player';
-import { insertReplacementButton, removeReplaceButton } from '@/utils/button';
+import type { LocationChangeDetail } from '@/utils/types';
+import { insertReplacementButton } from '@/utils/button';
+import { logger } from '@/utils/logger';
 
 let replaceButtonClicked = false;
-let currentLiveSource: LiveSource | null = null;
 let currentObserver: MutationObserver | null = null;
 
 function handleNavigation(url: string) {
-  replaceButtonClicked = false;
-
-  getLivestream(url).then((source) => {
-    currentLiveSource = source;
-
-    const root = document.querySelector('[data-a-player-state]');
-    if (root && !hasVideoElements()) {
-      modifyVideoElement(source);
-      replaceButtonClicked = true;
-      removeReplaceButton();
-    }
-
-    tryInsertButton();
-  });
+  logger.log(`handle navigation to: ${url}`);
+  tryInsertButton();
 }
 
 function tryInsertButton() {
   if (replaceButtonClicked) return;
 
-  insertReplacementButton(currentLiveSource, () => {
+  insertReplacementButton(() => {
     replaceButtonClicked = true;
     if (currentObserver) {
       currentObserver.disconnect();
@@ -61,7 +47,7 @@ function observeSubscribeButton() {
 export default defineContentScript({
   matches: ['*://www.twitch.tv/*'],
   main() {
-    console.log('[twitch-adblock] Extension loaded');
+    logger.log('[twitch-adblock] extension loaded');
     injectScript('/inject-history.js', { keepInDom: false });
 
     window.addEventListener('twitch-adblock:locationchange', ((e: CustomEvent<LocationChangeDetail>) => {

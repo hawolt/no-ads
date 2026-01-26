@@ -1,4 +1,3 @@
-import type { LiveSource } from './types';
 import { modifyVideoElement } from './player';
 
 const THUNDER_SVG = `
@@ -11,7 +10,6 @@ const THUNDER_SVG = `
 `;
 
 export function insertReplacementButton(
-  liveSource: LiveSource | null,
   onReplaceClicked: () => void
 ): boolean {
   const button = document.querySelector('button[data-a-target="subscribe-button"]');
@@ -49,7 +47,7 @@ export function insertReplacementButton(
     e.preventDefault();
     e.stopPropagation();
     onReplaceClicked();
-    modifyVideoElement(liveSource);
+    modifyVideoElement();
     clone.remove();
   });
 
