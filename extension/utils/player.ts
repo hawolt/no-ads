@@ -28,6 +28,21 @@ export async function modifyVideoElement() {
 
   video.remove();
 
+  const pbpObserver = new MutationObserver(() => {
+    const pictureByPicturePlayer = document.querySelector('.picture-by-picture-player');
+    if (pictureByPicturePlayer) {
+      logger.info('Removing picture-by-picture player');
+      pictureByPicturePlayer.remove();
+      pbpObserver.disconnect();
+    }
+  });
+
+  pbpObserver.observe(document.body, { childList: true, subtree: true });
+
+  setTimeout(() => {
+    pbpObserver.disconnect();
+  }, 10000);
+
   const ref = document.querySelector('[data-a-target="video-ref"]');
   if (ref) {
     const videoChild = ref.querySelector('[class*="video"]') as HTMLElement | null;
