@@ -7,6 +7,7 @@ import { modifyVideoElement } from '@/utils/player';
 
 let replaceButtonClicked = false;
 let currentObserver: MutationObserver | null = null;
+let observerTimeout: ReturnType<typeof setTimeout> | null = null;
 
 function hasSubscribeButton(): boolean {
   return !!document.querySelector('button[data-a-target="subscribe-button"]');
@@ -32,10 +33,19 @@ function observeForAutoReplace() {
     currentObserver = null;
   }
 
+  if (observerTimeout) {
+    clearTimeout(observerTimeout);
+    observerTimeout = null;
+  }
+
   if (replaceButtonClicked) return;
 
   currentObserver = new MutationObserver(() => {
-    tryAutoReplace();
+    if (observerTimeout) return;
+    observerTimeout = setTimeout(() => {
+      observerTimeout = null;
+      tryAutoReplace();
+    }, 100);
   });
 
   if (document.body) {
@@ -49,11 +59,14 @@ function observeForAutoReplace() {
 
 async function tryAutoReplace() {
   if (replaceButtonClicked) return;
-
+if (observerTimeout) {
+        clearTimeout(observerTimeout);
+        observerTimeout = null;
+      }
+      
   if (hasSubscribeButton()) {
     const hasVideo = document.querySelector('video');
     if (hasVideo) {
-      logger.log('Auto-replacing player (subscribe button found - not subscribed)...');
       replaceButtonClicked = true;
       if (currentObserver) {
         currentObserver.disconnect();
@@ -69,6 +82,10 @@ function tryInsertButton() {
 
   insertReplacementButton(() => {
     replaceButtonClicked = true;
+    if (observerTimeout) {
+      clearTimeout(observerTimeout);
+      observerTimeout = null;
+    }
     if (currentObserver) {
       currentObserver.disconnect();
       currentObserver = null;
@@ -82,10 +99,19 @@ function observeSubscribeButton() {
     currentObserver = null;
   }
 
+  if (observerTimeout) {
+    clearTimeout(observerTimeout);
+    observerTimeout = null;
+  }
+
   if (replaceButtonClicked) return;
 
   currentObserver = new MutationObserver(() => {
-    tryInsertButton();
+    if (observerTimeout) return;
+    observerTimeout = setTimeout(() => {
+      observerTimeout = null;
+      tryInsertButton();
+    }, 100);
   });
 
   if (document.body) {
