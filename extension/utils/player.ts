@@ -32,7 +32,6 @@ export async function modifyVideoElement() {
   const pbpObserver = new MutationObserver(() => {
     const pictureByPicturePlayer = document.querySelector('.picture-by-picture-player');
     if (pictureByPicturePlayer) {
-      logger.info('Removing picture-by-picture player');
       pictureByPicturePlayer.remove();
       pbpObserver.disconnect();
     }
