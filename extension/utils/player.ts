@@ -1,6 +1,7 @@
 import Hls from 'hls.js';
 import { logger } from './logger';
 import { getLivestream } from "@/utils/api";
+import { getSavedVolume, setSavedVolume } from '@/utils/storage';
 
 let currentHlsInstance: Hls | null = null;
 
@@ -46,6 +47,17 @@ export async function modifyVideoElement() {
   inject.controls = true;
   inject.autoplay = true;
   inject.muted = false;
+
+  const savedVolume = getSavedVolume();
+  if (savedVolume !== null) {
+    inject.volume = Math.max(0, Math.min(1, savedVolume));
+  } else {
+    inject.volume = 0.5;
+  }
+
+  inject.addEventListener('volumechange', () => {
+    setSavedVolume(inject.volume);
+  });
 
   try {
 
