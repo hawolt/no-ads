@@ -27,7 +27,7 @@ function getStorageAPI() {
 export async function getAutoReplaceEnabled(): Promise<boolean> {
   const storage = getStorageAPI();
   if (storage) {
-    const result = await storage.sync.get(STORAGE_KEYS.AUTO_REPLACE);
+    const result = await storage.local.get(STORAGE_KEYS.AUTO_REPLACE);
     return result[STORAGE_KEYS.AUTO_REPLACE] ?? false;
   }
   const stored = localStorage.getItem(STORAGE_KEYS.AUTO_REPLACE);
@@ -37,7 +37,7 @@ export async function getAutoReplaceEnabled(): Promise<boolean> {
 export async function setAutoReplaceEnabled(enabled: boolean): Promise<void> {
   const storage = getStorageAPI();
   if (storage) {
-    await storage.sync.set({ [STORAGE_KEYS.AUTO_REPLACE]: enabled });
+    await storage.local.set({ [STORAGE_KEYS.AUTO_REPLACE]: enabled });
   } else {
     localStorage.setItem(STORAGE_KEYS.AUTO_REPLACE, enabled.toString());
   }
