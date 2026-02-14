@@ -196,12 +196,6 @@ public class Tray {
     }
 
     private static boolean enableAutoStartMac() {
-        String jarPath = getExecutablePath();
-        if (jarPath == null) {
-            Logger.error("Could not determine JAR path");
-            return false;
-        }
-
         // Ensure LaunchAgents directory exists
         Path launchAgentsDir = getMacOSPlistPath().getParent();
         try {
@@ -211,8 +205,48 @@ public class Tray {
             return false;
         }
 
+        // Determine java executable and JAR paths
+        String javaPath = getExecutablePath();
+        String jarPath;
+        
+        if (javaPath == null) {
+            Logger.error("Could not determine executable path");
+            return false;
+        }
+        
+        // If we got a java executable path, find the JAR from the classpath
+        if (javaPath.endsWith("java") || javaPath.contains("/bin/java")) {
+            try {
+                jarPath = Tray.class.getProtectionDomain()
+                    .getCodeSource()
+                    .getLocation()
+                    .toURI()
+                    .getPath();
+            } catch (Exception e) {
+                Logger.error("Failed to get JAR path: {}", e.getMessage());
+                return false;
+            }
+        } else {
+            // Assume we got an executable that can be run directly
+            jarPath = javaPath;
+            javaPath = "java"; // Use system java
+        }
+
         // Create plist content
-        String plistContent = String.format(
+        String plistContent = createPlistContent(javaPath, jarPath);
+
+        // Write plist file
+        try {
+            Files.writeString(getMacOSPlistPath(), plistContent);
+            return true;
+        } catch (IOException e) {
+            Logger.error("Failed to write plist file: {}", e.getMessage());
+            return false;
+        }
+    }
+    
+    private static String createPlistContent(String javaPath, String jarPath) {
+        return String.format(
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
             "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n" +
             "<plist version=\"1.0\">\n" +
@@ -229,54 +263,9 @@ public class Tray {
             "    <true/>\n" +
             "</dict>\n" +
             "</plist>\n",
-            jarPath, // This will be the java executable path
-            jarPath  // This should be the JAR path, but we'll use command for now
+            javaPath,
+            jarPath
         );
-
-        // If jarPath ends with java, we need to find the actual JAR
-        if (jarPath.endsWith("java") || jarPath.contains("java")) {
-            // Get the JAR location from the classpath or code source
-            try {
-                String actualJarPath = Tray.class.getProtectionDomain()
-                    .getCodeSource()
-                    .getLocation()
-                    .toURI()
-                    .getPath();
-                
-                plistContent = String.format(
-                    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
-                    "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n" +
-                    "<plist version=\"1.0\">\n" +
-                    "<dict>\n" +
-                    "    <key>Label</key>\n" +
-                    "    <string>com.hawolt.twitchadblock</string>\n" +
-                    "    <key>ProgramArguments</key>\n" +
-                    "    <array>\n" +
-                    "        <string>%s</string>\n" +
-                    "        <string>-jar</string>\n" +
-                    "        <string>%s</string>\n" +
-                    "    </array>\n" +
-                    "    <key>RunAtLoad</key>\n" +
-                    "    <true/>\n" +
-                    "</dict>\n" +
-                    "</plist>\n",
-                    jarPath,
-                    actualJarPath
-                );
-            } catch (Exception e) {
-                Logger.error("Failed to get JAR path: {}", e.getMessage());
-                return false;
-            }
-        }
-
-        // Write plist file
-        try {
-            Files.writeString(getMacOSPlistPath(), plistContent);
-            return true;
-        } catch (IOException e) {
-            Logger.error("Failed to write plist file: {}", e.getMessage());
-            return false;
-        }
     }
 
     private static boolean disableAutoStartMac() {
