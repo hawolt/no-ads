@@ -45,16 +45,10 @@ fn main() -> io::Result<()> {
         })
         .next()
         .expect("Could not find javaw.exe in extracted JRE");
-    let exe_path = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.to_str().map(|s| s.to_string()))
-        .unwrap_or_default();
-    
     Command::new(java)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .creation_flags(0x08000000)
-        .arg(format!("-Dapp.exe.path={}", exe_path))
         .arg("-jar")
         .arg(path)
         .output()
