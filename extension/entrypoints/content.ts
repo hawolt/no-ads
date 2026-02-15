@@ -2,13 +2,79 @@ import { injectScript } from 'wxt/utils/inject-script';
 import type { LocationChangeDetail } from '@/utils/types';
 import { insertReplacementButton } from '@/utils/button';
 import { logger } from '@/utils/logger';
+import { getAutoReplaceEnabled } from '@/utils/storage';
+import { modifyVideoElement } from '@/utils/player';
 
 let replaceButtonClicked = false;
 let currentObserver: MutationObserver | null = null;
+let observerTimeout: ReturnType<typeof setTimeout> | null = null;
 
-function handleNavigation(url: string) {
+function hasSubscribeButton(): boolean {
+  return !!document.querySelector('button[data-a-target="subscribe-button"]');
+}
+
+async function handleNavigation(url: string) {
   logger.log(`handle navigation to: ${url}`);
-  tryInsertButton();
+
+  replaceButtonClicked = false;
+
+  const autoReplace = await getAutoReplaceEnabled();
+  
+  if (autoReplace) {
+    observeForAutoReplace();
+  } else {
+    observeSubscribeButton();
+  }
+}
+
+function observeForAutoReplace() {
+  if (currentObserver) {
+    currentObserver.disconnect();
+    currentObserver = null;
+  }
+
+  if (observerTimeout) {
+    clearTimeout(observerTimeout);
+    observerTimeout = null;
+  }
+
+  if (replaceButtonClicked) return;
+
+  currentObserver = new MutationObserver(() => {
+    if (observerTimeout) return;
+    observerTimeout = setTimeout(() => {
+      observerTimeout = null;
+      tryAutoReplace();
+    }, 100);
+  });
+
+  if (document.body) {
+    currentObserver.observe(document.body, {
+      childList: true,
+      subtree: true,
+    });
+    tryAutoReplace();
+  }
+}
+
+async function tryAutoReplace() {
+  if (replaceButtonClicked) return;
+if (observerTimeout) {
+        clearTimeout(observerTimeout);
+        observerTimeout = null;
+      }
+      
+  if (hasSubscribeButton()) {
+    const hasVideo = document.querySelector('video');
+    if (hasVideo) {
+      replaceButtonClicked = true;
+      if (currentObserver) {
+        currentObserver.disconnect();
+        currentObserver = null;
+      }
+      await modifyVideoElement();
+    }
+  }
 }
 
 function tryInsertButton() {
@@ -16,6 +82,10 @@ function tryInsertButton() {
 
   insertReplacementButton(() => {
     replaceButtonClicked = true;
+    if (observerTimeout) {
+      clearTimeout(observerTimeout);
+      observerTimeout = null;
+    }
     if (currentObserver) {
       currentObserver.disconnect();
       currentObserver = null;
@@ -29,10 +99,19 @@ function observeSubscribeButton() {
     currentObserver = null;
   }
 
+  if (observerTimeout) {
+    clearTimeout(observerTimeout);
+    observerTimeout = null;
+  }
+
   if (replaceButtonClicked) return;
 
   currentObserver = new MutationObserver(() => {
-    tryInsertButton();
+    if (observerTimeout) return;
+    observerTimeout = setTimeout(() => {
+      observerTimeout = null;
+      tryInsertButton();
+    }, 100);
   });
 
   if (document.body) {
@@ -55,6 +134,5 @@ export default defineContentScript({
     }) as EventListener);
 
     handleNavigation(window.location.href);
-    observeSubscribeButton();
   },
 });
