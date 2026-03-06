@@ -24,7 +24,7 @@ public class DefaultInstanceSupplier extends TwitchInstanceProvider {
                 .addHeader("Accept", "*/*")
                 .addHeader("Connection", "keep-alive")
                 .addHeader("Host", "www.twitch.tv")
-                .head();
+                .get();
         try (IonResponse response = client.execute(request)) {
             return getCookie(client);
         }
