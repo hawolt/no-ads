@@ -23,7 +23,6 @@ public class TwitchGQL {
         IonRequest request = IonRequest.on("https://gql.twitch.tv/gql")
                 .addHeader("Cookie", instance.getCookie())
                 .addHeader("Client-ID", TwitchClientIdProvider.getGlobalClientId())
-                .addHeader("Device-ID", instance.getUniqueId())
                 .addHeader("Content-Type", "text/plain")
                 .addHeader("Accept", "*/*")
                 .addHeader("Host", "gql.twitch.tv")
